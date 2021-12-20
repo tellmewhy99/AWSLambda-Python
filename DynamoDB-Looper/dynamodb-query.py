@@ -20,7 +20,7 @@ class SubtenantDynamodbTable:
         self._tenant_id = os.environ.get('TENANT_ID')
         self._tenant_env = os.environ.get('TENANT_ENV')
         self._internal_bucket_name = f"{self._account_name}-" \
-                                     f"{self._tenant_id}-{self._tenant_env}" \
+                                     f"data-central-logs" \
                                      f"-internal"
         self._current_time = f"ds={datetime.utcnow().strftime('%Y%m%d')}"
         self._prefix = "services/access_report/dynamodb"
@@ -32,19 +32,31 @@ class SubtenantDynamodbTable:
     def execute(self):
         data = self._get_dynamodb_table_attributes()
         pprint.pprint(data)
-        #self._write_csv(data)
+        self._write_csv(data)
 
     def _get_dynamodb_table_attributes(self):
-        
+
         dynamodb = boto3.resource('dynamodb')
         table = dynamodb.Table('acs_permissions')
-        response = table.scan(ProjectionExpression="redshift_cluster,tenant_id,environment,data_zone,identity_id,access")
+        response = table.scan(
+                    ProjectionExpression="redshift_cluster,\
+                                          tenant_id,\
+                                          environment,\
+                                          identity_id,\
+                                          access")
         data = response['Items']
 
         while 'LastEvaluatedKey' in response:
-            response = table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+            response = table.scan(
+                            ExclusiveStartKey=response['LastEvaluatedKey'])
             data.extend(response['Items'])
 
+        '''
+        LOGGER.info("Obtaining attributes from "
+                    f"Dynamodb table: {self._dynamodb_table}")
+        data = DynamoDb().with_table(
+                   self._dynamodb_table).get_item_by_scan()
+        '''
         return data
 
     def _write_csv(self, data):
@@ -53,10 +65,10 @@ class SubtenantDynamodbTable:
         df.to_csv(csv_buffer, sep=",", index=False)
         LOGGER.info(f"writing CSV file to {self._internal_bucket_name} with "
                     f"key {self._key}")
-        s3 = S3()
+        s3 = boto3.client('s3')
         s3.put_object(
-                    bucket_name=self._internal_bucket_name,
-                    obj_key=self._key,
-                    body=csv_buffer.getvalue(),
-                    sse=self._server_side_encryption)
+                    Bucket=self._internal_bucket_name,
+                    Key=self._key,
+                    Body=csv_buffer.getvalue(),
+                    SSECustomerAlgorithm=self._server_side_encryption)
         LOGGER.info("uploaded file")
